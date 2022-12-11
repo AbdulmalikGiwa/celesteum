@@ -53,14 +53,15 @@ func main() {
 	fmt.Printf("Block number: %d\n", block.Number())
 	fmt.Printf("Block hash: %s\n", block.Hash().Hex())
 
-	// Iterate over the transactions in the block and post hashes to celestia Node
-	for _, tx := range block.Transactions() {
-		blockData["data"] = tx.Hash().Hex()
-		respBody, err := postToCelestia(celestiaNodeUrl, blockData)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println(string(respBody))
+	// Convert the block data to JSON
+	blockJSON, err := json.Marshal(block.Body())
+	if err != nil {
+		log.Fatal(err)
+	}
+	blockData["data"] = string(blockJSON)
+	_, err = postToCelestia(celestiaNodeUrl, blockData)
+	if err != nil {
+		log.Fatal(err)
 	}
 }
 
