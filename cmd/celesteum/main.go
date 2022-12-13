@@ -61,11 +61,11 @@ func main() {
 			fmt.Printf("Block hash: %s\n", header.Hash().Hex())
 
 			// Convert the block header data to JSON
-			headerJSON, err := json.Marshal(header)
+			_, err := json.Marshal(header)
 			if err != nil {
 				log.Fatal(err)
 			}
-			blockData["data"] = string(headerJSON)
+			blockData["data"] = "f1f20ca8007e910a3bf8b2e61da0f26bca07ef78717a6ea54165f5"
 			_, err = postToCelestia(celestiaNodeUrl, blockData)
 			if err != nil {
 				log.Fatal(err)
@@ -78,13 +78,15 @@ func postToCelestia(url string, data map[string]interface{}) ([]byte, error) {
 
 	// Add payfordata endpoint
 	url = fmt.Sprintf("%s/submit_pfd", url)
+	fmt.Println(url)
+	fmt.Println(data)
 
 	// Marshal the data into JSON.
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return nil, err
 	}
-
+	fmt.Println(jsonData)
 	// Create the request.
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -97,6 +99,7 @@ func postToCelestia(url string, data map[string]interface{}) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println(resp.StatusCode)
 	defer resp.Body.Close()
 
 	// Read the response body into a buffer.
@@ -104,7 +107,6 @@ func postToCelestia(url string, data map[string]interface{}) ([]byte, error) {
 	if _, err := io.Copy(buf, resp.Body); err != nil {
 		return nil, err
 	}
-
 	// Return the response body as a byte slice.
 	return buf.Bytes(), nil
 }
