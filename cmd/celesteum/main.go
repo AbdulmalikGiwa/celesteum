@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/joho/godotenv"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -37,31 +38,39 @@ func main() {
 	celestiaNodeUrl := os.Getenv("CELESTIA_NODE_URL")
 
 	// Create an ethclient.Client
-	alchemyUrl := fmt.Sprintf("https://eth-goerli.g.alchemy.com/v2/%s", apiKey)
+	alchemyUrl := fmt.Sprintf("wss://eth-mainnet.g.alchemy.com/v2/%s", apiKey)
 	client, err := ethclient.Dial(alchemyUrl)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Get the latest block
-	block, err := client.BlockByNumber(context.Background(), nil)
+	// Subscribe to new blocks
+	headers := make(chan *types.Header)
+	sub, err := client.SubscribeNewHead(context.Background(), headers)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Print the block number and hash
-	fmt.Printf("Block number: %d\n", block.Number())
-	fmt.Printf("Block hash: %s\n", block.Hash().Hex())
+	// Print the block number and hash for new blocks
+	for {
+		select {
+		case err := <-sub.Err():
+			log.Fatal(err)
+		case header := <-headers:
+			fmt.Printf("Block number: %d\n", header.Number)
+			fmt.Printf("Block hash: %s\n", header.Hash().Hex())
 
-	// Convert the block data to JSON
-	blockJSON, err := json.Marshal(block.Body())
-	if err != nil {
-		log.Fatal(err)
-	}
-	blockData["data"] = string(blockJSON)
-	_, err = postToCelestia(celestiaNodeUrl, blockData)
-	if err != nil {
-		log.Fatal(err)
+			// Convert the block header data to JSON
+			headerJSON, err := json.Marshal(header)
+			if err != nil {
+				log.Fatal(err)
+			}
+			blockData["data"] = string(headerJSON)
+			_, err = postToCelestia(celestiaNodeUrl, blockData)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
 	}
 }
 
@@ -90,6 +99,12 @@ func postToCelestia(url string, data map[string]interface{}) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 
-	// Read and return the response body.
-	return ioutil.ReadAll(resp.Body)
+	// Read the response body into a buffer.
+	buf := new(bytes.Buffer)
+	if _, err := io.Copy(buf, resp.Body); err != nil {
+		return nil, err
+	}
+
+	// Return the response body as a byte slice.
+	return buf.Bytes(), nil
 }
