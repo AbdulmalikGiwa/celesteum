@@ -3,18 +3,25 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/joho/godotenv"
+	"github.com/streadway/amqp"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/ethereum/go-ethereum/ethclient"
 )
+
+type Response struct {
+	Height int `json:"height"`
+}
 
 func main() {
 
@@ -61,15 +68,23 @@ func main() {
 			fmt.Printf("Block hash: %s\n", header.Hash().Hex())
 
 			// Convert the block header data to JSON
-			_, err := json.Marshal(header)
+			headerJson, err := json.Marshal(header)
 			if err != nil {
 				log.Fatal(err)
 			}
-			blockData["data"] = "f1f20ca8007e910a3bf8b2e61da0f26bca07ef78717a6ea54165f5"
-			_, err = postToCelestia(celestiaNodeUrl, blockData)
+			blockData["data"] = hex.EncodeToString(headerJson)
+			//blockData["data"] = "f1f20ca8007e910a3bf8b2e61da0f26bca07ef78717a6ea54165f5"
+			resp, err := postToCelestia(celestiaNodeUrl, blockData)
 			if err != nil {
 				log.Fatal(err)
 			}
+			var response Response
+			err = json.Unmarshal(resp, &response)
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Println(response.Height)
+			publishToQueue(response.Height)
 		}
 	}
 }
@@ -78,15 +93,13 @@ func postToCelestia(url string, data map[string]interface{}) ([]byte, error) {
 
 	// Add payfordata endpoint
 	url = fmt.Sprintf("%s/submit_pfd", url)
-	fmt.Println(url)
-	fmt.Println(data)
 
 	// Marshal the data into JSON.
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(jsonData)
+
 	// Create the request.
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -99,7 +112,7 @@ func postToCelestia(url string, data map[string]interface{}) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(resp.StatusCode)
+
 	defer resp.Body.Close()
 
 	// Read the response body into a buffer.
@@ -109,4 +122,40 @@ func postToCelestia(url string, data map[string]interface{}) ([]byte, error) {
 	}
 	// Return the response body as a byte slice.
 	return buf.Bytes(), nil
+}
+
+func publishToQueue(heightValue int) {
+	rabbitMQ := os.Getenv("RABBITMQ_URL")
+	conn, err := amqp.Dial(rabbitMQ)
+	if err != nil {
+		log.Fatal(err)
+	}
+	ch, err := conn.Channel()
+	if err != nil {
+		log.Fatal(err)
+	}
+	_, err = ch.QueueDeclare(
+		"blockHeight", // queue name
+		false,         // durable
+		false,         // delete when unused
+		false,         // exclusive
+		false,         // no-wait
+		nil,           // arguments
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = ch.Publish(
+		"",            // exchange
+		"blockHeight", // routing key
+		false,         // mandatory
+		false,         // immediate
+		amqp.Publishing{
+			ContentType: "text/plain",
+			Body:        []byte(strconv.Itoa(heightValue)),
+		})
+	if err != nil {
+		log.Fatal(err)
+	}
+
 }

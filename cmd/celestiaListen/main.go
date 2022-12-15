@@ -2,22 +2,22 @@ package main
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/joho/godotenv"
+	"github.com/streadway/amqp"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 )
 
 // Response represents the response from the GET request
 type Response struct {
-	Data   []string `json:"data"`
-	Height int      `json:"height"`
+	Data []string `json:"data"`
 }
 
 func main() {
@@ -25,16 +25,9 @@ func main() {
 	var namespaceId string
 	flag.StringVar(&namespaceId, "namespaceId", "0c204d39600fddd3", "Namespace Id to post data to on Celestia blockchain")
 
-	var blockHeight int
-	flag.IntVar(&blockHeight, "blockHeight", 0, "Block height")
-
 	flag.Parse()
 	if namespaceId == "" {
 		fmt.Println("Error: namespaceId flag is required")
-		return
-	}
-	if blockHeight == 0 {
-		fmt.Println("Error: blockHeight flag is required")
 		return
 	}
 
@@ -44,49 +37,82 @@ func main() {
 		log.Fatal("Error loading .env file")
 	}
 
-	// Get the value of the CELESTIA_NODE_URL
-	celestiaNodeUrl := os.Getenv("CELESTIA_NODE_URL")
+	rabbitMQ := os.Getenv("RABBITMQ_URL")
+	fmt.Println(rabbitMQ)
 
-	celestiaApi := fmt.Sprintf("%s/namespaced_data/%s/height/%d}", celestiaNodeUrl, namespaceId, blockHeight)
-	// Send a GET request to the specified URL
-	resp, err := http.Get(celestiaApi)
+	conn, err := amqp.Dial(rabbitMQ)
 	if err != nil {
-		fmt.Println(err)
-		return
+		log.Fatal(err)
 	}
-	defer resp.Body.Close()
-
-	buf := new(bytes.Buffer)
-	_, err = io.Copy(buf, resp.Body)
+	ch, err := conn.Channel()
 	if err != nil {
-		fmt.Println(err)
-		return
+		log.Fatal(err)
+	}
+	msgs, err := ch.Consume(
+		"blockHeight", // queue name
+		"",            // consumer tag
+		true,          // auto-ack
+		false,         // exclusive
+		false,         // no-local
+		false,         // no-wait
+		nil,           // args
+	)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	// Unmarshal the response body into the Response struct
-	var response Response
-	if err := json.Unmarshal(buf.Bytes(), &response); err != nil {
-		fmt.Println(err)
-		return
-	}
-	var hexStr string
-	// Iterate over the items in the data array
-	for _, item := range response.Data {
-		// Decode the item from base64 to bytes
-		// Todo: confirm if multiple items can be in data array
-		responseBytes, err := base64.StdEncoding.DecodeString(item)
-		if err != nil {
-			fmt.Println(err)
-			continue
+	// Listen for messages on the channel and process them as they arrive.
+	for {
+		fmt.Println("ENTER")
+		for msg := range msgs {
+			// Get the value of the CELESTIA_NODE_URL
+			celestiaNodeUrl := os.Getenv("CELESTIA_NODE_URL")
+			blockHeight, err := strconv.Atoi(string(msg.Body))
+			if err != nil {
+				log.Fatal(err)
+			}
+			celestiaApi := fmt.Sprintf("%s/namespaced_data/%s/height/%d}", celestiaNodeUrl, namespaceId, blockHeight)
+			// Send a GET request to the CELESTIA
+			fmt.Println(celestiaApi)
+			func() {
+				resp, err := http.Get(celestiaApi)
+				if err != nil {
+					fmt.Println(err)
+					return
+				}
+				fmt.Println(resp.StatusCode)
+				defer resp.Body.Close()
+				buf := new(bytes.Buffer)
+				_, err = io.Copy(buf, resp.Body)
+				if err != nil {
+					log.Fatal(err)
+				}
+				// Unmarshal the response body into the Response struct
+				var response Response
+				if err := json.Unmarshal(buf.Bytes(), &response); err != nil {
+					log.Fatal(err)
+				}
+				for _, item := range response.Data {
+					// Decode the item from base64 to bytes
+					// Todo: confirm if multiple items can be in data array
+					decodeBlock(item)
+
+				}
+			}()
+
 		}
-
-		// Encode the decoded bytes to hex
-		hexStr = hex.EncodeToString(responseBytes)
-
 	}
-	blockJsonData, err := json.Marshal(hexStr)
+
+}
+func decodeBlock(block string) {
+	headerJson, err := hex.DecodeString(block)
 	if err != nil {
-		fmt.Println(err)
+		log.Fatal(err)
 	}
-	fmt.Println(string(blockJsonData))
+	var data interface{}
+	err = json.Unmarshal(headerJson, &data)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("%+v\n", data)
 }
