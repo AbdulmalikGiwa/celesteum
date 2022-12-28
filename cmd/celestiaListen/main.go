@@ -71,7 +71,7 @@ func main() {
 			if err != nil {
 				log.Fatal(err)
 			}
-			celestiaApi := fmt.Sprintf("%s/namespaced_data/%s/height/%d}", celestiaNodeUrl, namespaceId, blockHeight)
+			celestiaApi := fmt.Sprintf("%s/namespaced_data/%s/height/%d", celestiaNodeUrl, namespaceId, blockHeight)
 			// Send a GET request to the CELESTIA
 			fmt.Println(celestiaApi)
 			func() {

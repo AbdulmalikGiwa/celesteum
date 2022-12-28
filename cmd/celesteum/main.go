@@ -79,6 +79,12 @@ func main() {
 				log.Fatal(err)
 			}
 			var response Response
+			var test interface{}
+			err = json.Unmarshal(resp, &test)
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Println(test)
 			err = json.Unmarshal(resp, &response)
 			if err != nil {
 				log.Fatal(err)
